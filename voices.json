@@ -1,0 +1,6 @@
+[
+  { "id": "ru_RU-ruslan-medium", "label": "Russian — Ruslan (medium)", "onnx": "./ru_RU-ruslan-medium.onnx", "config": "./ru_RU-ruslan-medium.onnx.json",
+    "sample": "Привет! Это модель Руслан. Она запущена прямо в браузере: фонемизация через espeak-ng WebAssembly, синтез через onnxruntime-web." },
+  { "id": "en_US-joe-medium", "label": "English (US) — Joe (medium)", "onnx": "./en_US-joe-medium.onnx", "config": "./en_US-joe-medium.onnx.json",
+    "sample": "Hello! This is the Joe voice, running entirely inside your browser with espeak-ng WebAssembly and onnxruntime-web. No servers involved." }
+]

@@ -1,0 +1,40 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><title>Piper TTS — offline in browser</title>
+<style>body{font-family:system-ui;max-width:720px;margin:2em auto}textarea{width:100%}select,input,button{font:inherit}</style>
+<h2>Piper TTS · fully offline in the browser</h2>
+<p><label>Voice / language: <select id="v"></select></label> <span id="s">loading…</span></p>
+<textarea id="t" rows="4"></textarea>
+<p><button id="b" disabled>Synthesize</button>
+   <label>length_scale <input id="ls" type="number" step="0.05" value="1" style="width:5em"></label></p>
+<audio id="a" controls></audio> <a id="dl" download="speech.wav" hidden>download wav</a>
+<script src="./vendor/ort/ort.wasm.min.js"></script>
+<script src="./vendor/phonemize/piper_phonemize.js"></script>
+<script src="./piper-browser.js"></script>
+<script>
+(async () => {
+  const $ = id => document.getElementById(id);
+  const voices = await fetch("./voices.json").then(r => r.json());
+  const engines = new Map();                       // lazy: a model is loaded on first selection
+  for (const v of voices) $("v").append(new Option(v.label, v.id));
+
+  async function select(id) {
+    const v = voices.find(x => x.id === id);
+    $("t").value = v.sample; $("b").disabled = true; $("s").textContent = "loading model…";
+    if (!engines.has(id)) engines.set(id, Piper.createEngine(v.onnx, v.config));
+    await engines.get(id); await Piper.getPhonemizer();
+    $("s").textContent = `ready (espeak: ${(await engines.get(id)).cfg.espeak.voice})`; $("b").disabled = false;
+  }
+  $("v").onchange = () => select($("v").value);
+
+  window.__speak = async (text, id = $("v").value) => {
+    const eng = await engines.get(id), t0 = performance.now();
+    const pcm = await eng.speak(text, { lengthScale: +$("ls").value });
+    const blob = Piper.toWav(pcm, eng.sampleRate), url = URL.createObjectURL(blob);
+    $("a").src = url; $("dl").href = url; $("dl").hidden = false;
+    $("s").textContent = `${(pcm.length / eng.sampleRate).toFixed(2)} s of audio in ${Math.round(performance.now() - t0)} ms`;
+    return { seconds: pcm.length / eng.sampleRate, ms: performance.now() - t0, wav: Array.from(new Uint8Array(await blob.arrayBuffer())) };
+  };
+  window.__select = select;
+  $("b").onclick = () => __speak($("t").value);
+  await select(voices[0].id);
+})();
+</script>
