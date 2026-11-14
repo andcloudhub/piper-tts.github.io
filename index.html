@@ -1,40 +1,236 @@
-<!doctype html><html lang="en"><meta charset="utf-8"><title>Piper TTS — offline in browser</title>
-<style>body{font-family:system-ui;max-width:720px;margin:2em auto}textarea{width:100%}select,input,button{font:inherit}</style>
-<h2>Piper TTS · fully offline in the browser</h2>
-<p><label>Voice / language: <select id="v"></select></label> <span id="s">loading…</span></p>
-<textarea id="t" rows="4"></textarea>
-<p><button id="b" disabled>Synthesize</button>
-   <label>length_scale <input id="ls" type="number" step="0.05" value="1" style="width:5em"></label></p>
-<audio id="a" controls></audio> <a id="dl" download="speech.wav" hidden>download wav</a>
+
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<meta name="theme-color" content="#030b18">
+<title>J.A.R.V.I.S.</title>
+
+<style>
+*{box-sizing:border-box}
+body{
+ margin:0;background:radial-gradient(ellipse at center,#09233c,#030914 70%);
+ color:#c8f4ff;font-family:-apple-system,BlinkMacSystemFont,sans-serif;
+ min-height:100vh;overflow-x:hidden
+}
+header{text-align:center;padding:22px 12px 0}
+h1{letter-spacing:9px;font-size:25px;font-weight:300;margin:5px}
+.sub{font-size:10px;letter-spacing:4px;color:#4b9bb8}
+.status{font-size:12px;color:#63dfff;margin-top:12px}
+.core-wrap{
+ width:min(82vw,340px);aspect-ratio:1;margin:30px auto 22px;
+ position:relative;display:grid;place-items:center
+}
+.ring{
+ position:absolute;border:1px solid #36cfff;border-radius:50%;
+ box-shadow:0 0 15px #008dff55,inset 0 0 15px #008dff22
+}
+.r1{inset:2%;border-width:2px;border-style:dashed;animation:spin 24s linear infinite}
+.r2{inset:10%;border-color:#8cecff;animation:spin 13s linear infinite reverse}
+.r3{inset:19%;border-width:3px;border-style:dotted;animation:spin 9s linear infinite}
+.r4{inset:28%;border-color:#2879bb;animation:spin 18s linear infinite reverse}
+.core{
+ width:36%;height:36%;border-radius:50%;
+ background:radial-gradient(circle,#e8ffff 0%,#76eaff 12%,#168acb 35%,#07345f 65%,#020b1a 75%);
+ box-shadow:0 0 25px #32cfff,0 0 65px #008cff,0 0 110px #0077ff66;
+ animation:pulse 2.4s ease-in-out infinite
+}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes pulse{50%{transform:scale(1.08);filter:brightness(1.4)}}
+.panel{
+ width:min(92%,540px);margin:0 auto;padding:16px;
+ border:1px solid #1b7094;border-radius:16px;
+ background:#061526cc;box-shadow:0 0 30px #006eaa22
+}
+#log{height:190px;overflow:auto;font-size:14px;line-height:1.5}
+.msg{padding:8px 10px;margin:7px 0;border-radius:10px;background:#0b2940}
+.me{color:#8bdcff}.jarvis{color:#e0faff}
+.controls{display:flex;gap:8px;margin-top:12px}
+input{
+ flex:1;min-width:0;background:#06101e;border:1px solid #286987;
+ border-radius:10px;padding:13px;color:white;font-size:15px
+}
+button{
+ background:#0b4264;color:#d9faff;border:1px solid #38bde9;
+ border-radius:10px;padding:12px 15px;font-size:14px
+}
+button:active{background:#1478a3}
+.actions{display:flex;justify-content:center;gap:10px;margin:14px 0;flex-wrap:wrap}
+.small{font-size:11px;color:#64a9c1;text-align:center;margin:14px}
+</style>
+</head>
+
+<body>
+<header>
+ <h1>J.A.R.V.I.S.</h1>
+ <div class="sub">PERSONAL ASSISTANT</div>
+ <div class="status" id="status">INITIALIZING SYSTEM...</div>
+</header>
+
+<div class="core-wrap" id="core">
+ <div class="ring r1"></div>
+ <div class="ring r2"></div>
+ <div class="ring r3"></div>
+ <div class="ring r4"></div>
+ <div class="core"></div>
+</div>
+
+<section class="panel">
+ <div id="log">
+  <div class="msg jarvis">
+   J.A.R.V.I.S.: Добрый день. Система готова к запуску.
+  </div>
+ </div>
+ <div class="controls">
+  <input id="question" placeholder="Введите сообщение..." autocomplete="off">
+  <button id="send">➤</button>
+ </div>
+ <div class="actions">
+  <button id="mic">🎙 Голосовой ввод</button>
+  <button id="stop">■ Стоп</button>
+  <button id="clear">Очистить историю</button>
+ </div>
+ <div class="small" id="voiceStatus">Голосовой движок загружается...</div>
+</section>
+
 <script src="./vendor/ort/ort.wasm.min.js"></script>
 <script src="./vendor/phonemize/piper_phonemize.js"></script>
 <script src="./piper-browser.js"></script>
+
 <script>
-(async () => {
-  const $ = id => document.getElementById(id);
-  const voices = await fetch("./voices.json").then(r => r.json());
-  const engines = new Map();                       // lazy: a model is loaded on first selection
-  for (const v of voices) $("v").append(new Option(v.label, v.id));
+const $=id=>document.getElementById(id);
+let voices=[],engine=null,busy=false;
 
-  async function select(id) {
-    const v = voices.find(x => x.id === id);
-    $("t").value = v.sample; $("b").disabled = true; $("s").textContent = "loading model…";
-    if (!engines.has(id)) engines.set(id, Piper.createEngine(v.onnx, v.config));
-    await engines.get(id); await Piper.getPhonemizer();
-    $("s").textContent = `ready (espeak: ${(await engines.get(id)).cfg.espeak.voice})`; $("b").disabled = false;
-  }
-  $("v").onchange = () => select($("v").value);
+function addMessage(text,who){
+ const item=document.createElement("div");
+ item.className="msg "+who;
+ item.textContent=(who==="me"?"Вы: ":"J.A.R.V.I.S.: ")+text;
+ $("log").append(item);
+ $("log").scrollTop=$("log").scrollHeight;
+ const history=JSON.parse(localStorage.getItem("jarvisHistory")||"[]");
+ history.push({text,who});
+ localStorage.setItem("jarvisHistory",JSON.stringify(history.slice(-60)));
+}
 
-  window.__speak = async (text, id = $("v").value) => {
-    const eng = await engines.get(id), t0 = performance.now();
-    const pcm = await eng.speak(text, { lengthScale: +$("ls").value });
-    const blob = Piper.toWav(pcm, eng.sampleRate), url = URL.createObjectURL(blob);
-    $("a").src = url; $("dl").href = url; $("dl").hidden = false;
-    $("s").textContent = `${(pcm.length / eng.sampleRate).toFixed(2)} s of audio in ${Math.round(performance.now() - t0)} ms`;
-    return { seconds: pcm.length / eng.sampleRate, ms: performance.now() - t0, wav: Array.from(new Uint8Array(await blob.arrayBuffer())) };
-  };
-  window.__select = select;
-  $("b").onclick = () => __speak($("t").value);
-  await select(voices[0].id);
-})();
+function restoreHistory(){
+ const history=JSON.parse(localStorage.getItem("jarvisHistory")||"[]");
+ history.forEach(m=>{
+  const item=document.createElement("div");
+  item.className="msg "+m.who;
+  item.textContent=(m.who==="me"?"Вы: ":"J.A.R.V.I.S.: ")+m.text;
+  $("log").append(item);
+ });
+}
+
+async function initVoice(){
+ try{
+  voices=await fetch("./voices.json").then(r=>{
+   if(!r.ok)throw Error("Не удалось загрузить voices.json");
+   return r.json();
+  });
+  const ruslan=voices.find(v=>v.id==="ru_RU-ruslan-medium");
+  if(!ruslan)throw Error("Модель Руслан не найдена");
+  $("voiceStatus").textContent="Загружаю нейросетевую модель Руслан...";
+  engine=await Piper.createEngine(ruslan.onnx,ruslan.config);
+  await Piper.getPhonemizer();
+  $("voiceStatus").textContent="Piper Ruslan готов к работе";
+  $("status").textContent="SYSTEM ONLINE";
+  await speak("Здравствуйте. Я Джарвис. Система готова к работе.");
+ }catch(e){
+  console.error(e);
+  $("voiceStatus").textContent="Ошибка загрузки голоса: "+e.message;
+  $("status").textContent="VOICE SYSTEM ERROR";
+ }
+}
+
+async function speak(text){
+ if(!engine)return;
+ try{
+  $("core").style.filter="brightness(1.5)";
+  const pcm=await engine.speak(text,{lengthScale:0.96});
+  await Piper.playPcm(pcm,engine.sampleRate);
+ }catch(e){
+  console.error(e);
+  $("voiceStatus").textContent="Ошибка воспроизведения речи";
+ }finally{
+  $("core").style.filter="";
+ }
+}
+
+function answerFor(q){
+ const s=q.toLowerCase().trim();
+ if(/привет|здравствуй|добрый день|доброе утро/.test(s))
+  return "Здравствуйте, сэр. Рад вас слышать. Чем могу помочь?";
+ if(/как дела|как ты/.test(s))
+  return "Все системы работают штатно. Благодарю за интерес.";
+ if(/кто ты|представься/.test(s))
+  return "Я Джарвис, ваш персональный голосовой помощник.";
+ if(/время|который час/.test(s))
+  return "Сейчас "+new Date().toLocaleTimeString("ru-RU",{hour:"2-digit",minute:"2-digit"});
+ if(/дата|какое сегодня число/.test(s))
+  return "Сегодня "+new Date().toLocaleDateString("ru-RU",{dateStyle:"long"});
+ if(/спасибо/.test(s))
+  return "Всегда к вашим услугам, сэр.";
+ if(/пока|до свидания/.test(s))
+  return "До скорой встречи, сэр.";
+ return "Я получил вашу команду: "+q+". Модуль свободного искусственного интеллекта пока не подключён.";
+}
+
+async function send(){
+ const q=$("question").value.trim();
+ if(!q||busy)return;
+ busy=true;
+ $("question").value="";
+ addMessage(q,"me");
+ const answer=answerFor(q);
+ addMessage(answer,"jarvis");
+ await speak(answer);
+ busy=false;
+}
+
+$("send").onclick=send;
+$("question").addEventListener("keydown",e=>{
+ if(e.key==="Enter")send();
+});
+
+$("stop").onclick=()=>{
+ try{if(window.speechSynthesis) speechSynthesis.cancel();}catch(e){}
+ $("voiceStatus").textContent="Воспроизведение остановлено";
+};
+
+$("clear").onclick=()=>{
+ localStorage.removeItem("jarvisHistory");
+ $("log").innerHTML="";
+ addMessage("История очищена. Система готова.","jarvis");
+};
+
+let recognition=null;
+const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+
+if(SR){
+ recognition=new SR();
+ recognition.lang="ru-RU";
+ recognition.continuous=false;
+ recognition.interimResults=false;
+ recognition.onresult=e=>{
+  $("question").value=e.results[0][0].transcript;
+  send();
+ };
+ recognition.onerror=()=>{$("voiceStatus").textContent="Не удалось распознать речь. Попробуйте ещё раз."};
+ recognition.onend=()=>{$("mic").textContent="🎙 Голосовой ввод"};
+ $("mic").onclick=()=>{
+  try{
+   recognition.start();
+   $("mic").textContent="Слушаю...";
+  }catch(e){}
+ };
+}else{
+ $("mic").onclick=()=>{$("voiceStatus").textContent="Распознавание речи недоступно в этом браузере. Используйте ввод текста."};
+}
+
+restoreHistory();
+initVoice();
 </script>
+</body>
+</html>
